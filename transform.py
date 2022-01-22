@@ -1,6 +1,7 @@
 import argparse
 import csv
 import datetime
+import json
 
 class TradeHistory:
     def __init__(self, history):
@@ -33,25 +34,54 @@ def parse_bmo_trade_history(file):
     trade_histories = [TradeHistory(line) for line in lines if line]
     return trade_histories
 
+def fix_missing_fx(histories: TradeHistory):
+    """
+    2020-07-01 is bank holiday, manualy patching the FX rate with the average of the day before and after
+    https://www.bankofcanada.ca/rates/exchange/daily-exchange-rates-lookup/
+    """
+    for idx in range(len(histories)):
+        if histories[idx].currency == 'USD' and histories[idx].settlement_date == '07/01/2020':
+            histories[idx].currency = "0.73545"
+    return histories
+
 def main(input_file, output_file, commission=9.95):
     trade_histories = parse_bmo_trade_history(input_file)
+    trade_histories = fix_missing_fx(trade_histories)
     
     acb_output = [
         ["Date", "Security", "Transaction Type", "Amount", "Shares", "Commission", "Exchange Rate", "Total or Per Share", "Price in Foreign Currency?", "Commission in Foreign Currency?"]
     ]
     for history in trade_histories:
-        acb_output.append([
-            history.settlement_date,
-            history.symbol,
-            history.activity_description,
-            history.price,
-            history.quantity,
-            commission,
-            history.currency,
-            "Per Share",
-            "Yes",
-            "Yes"
-        ])
+        if history.currency != 'CDN':
+            acb_output.append([
+                history.settlement_date,
+                # Some trade histories are missing the symbol, but the description is (hopefully) the same as the symbol in this case
+                history.symbol if history.symbol else history.description,
+                history.activity_description,
+                history.price,
+                history.quantity,
+                commission,
+                history.currency,
+                "Per Share",
+                "Yes",
+                "Yes"
+            ])
+        else:
+            print(f"{history.description} {history.symbol}")
+            acb_output.append([
+                history.settlement_date,
+                # Some trade histories are missing the symbol, but the description is (hopefully) the same as the symbol in this case
+                history.symbol if history.symbol else history.description,
+                history.activity_description,
+                history.price,
+                history.quantity,
+                commission,
+                history.currency,
+                "Per Share",
+                "No",
+                "No"
+            ])
+
     
     writer = csv.writer(output_file)
     writer.writerows(acb_output)
